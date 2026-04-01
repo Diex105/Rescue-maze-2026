@@ -123,7 +123,7 @@ const int MAX_KITS_POR_SERVO = 4;
 
 
 const int SERVO_IZQ_CERRADO = 180;
-const int SERVO_IZQ_EMPUJE  = 70;
+const int SERVO_IZQ_EMPUJE  = 30;
 
 const int SERVO_DER_CERRADO = 0;
 const int SERVO_DER_EMPUJE  = 100;
@@ -610,7 +610,7 @@ ResultadoMovimiento avanzar_optimizado(int DISTANCIA_CM) {
     // 5. Mover motores
     forwardRaw(currentLeftSpeed, currentRightSpeed);
     
-    bool L = digitalRead(LLS);
+    /*bool L = digitalRead(LLS);
     bool R = digitalRead(RLS);
     
     if (R || L) {
@@ -629,7 +629,7 @@ ResultadoMovimiento avanzar_optimizado(int DISTANCIA_CM) {
       else acomodarObstaculoPID("DER", distanciaChoque);
 
       return MOV_OK;
-    }
+    }*/
 
 
     // --- DETECCIÓN DE RAMPA/ESCALERA ---
@@ -979,14 +979,14 @@ void avanzarInclinacion(float anguloObjetivo) {
 
   stopMotors();
   delay(180);
-  esperarEstable();
-  delay(80);
+
 
   // Realinearse con IMU
   turnToHeading(anguloObjetivo);
   delay(60);
   
   avanzarRectoConHeading(5, anguloObjetivo, BASE_SPEED - 25);
+
   saliendoDeRampa = true;
 }
 
@@ -1086,19 +1086,78 @@ bool tirarUnKitDisponible() {
 
 int tirarNKits(int cantidad) {
   int lanzados = 0;
+  bool giradoParaIzquierda = false;
 
   for (int i = 0; i < cantidad; i++) {
-    if (tirarUnKitDisponible()) {
-      lanzados++;
-      delay(250);
-    } else {
+
+    if (contadorKitsTotal >= MAX_KITS_TOTAL) {
+      Serial.println("No quedan kits totales");
       break;
     }
+
+    // ========= CASO 1: aun hay kits en derecha =========
+    if (contadorKitsDer < MAX_KITS_POR_SERVO) {
+      accionarServo(SR, SERVO_DER_CERRADO, SERVO_DER_EMPUJE);
+
+      contadorKitsDer++;
+      contadorKitsTotal++;
+      lanzados++;
+
+      Serial.print("Kit lanzado desde DERECHA | Izq: ");
+      Serial.print(contadorKitsIzq);
+      Serial.print(" | Der: ");
+      Serial.print(contadorKitsDer);
+      Serial.print(" | Total: ");
+      Serial.println(contadorKitsTotal);
+
+      delay(250);
+      continue;
+    }
+
+    // ========= CASO 2: ya toca usar izquierda =========
+    if (contadorKitsIzq < MAX_KITS_POR_SERVO) {
+
+      if (!giradoParaIzquierda) {
+        Serial.println("Girando 180 para lanzar desde IZQUIERDA");
+        giro90Izq();
+        delay(500);
+        giro90Izq();
+        delay(150);
+        giradoParaIzquierda = true;
+      }
+
+      accionarServo(SL, SERVO_IZQ_CERRADO, SERVO_IZQ_EMPUJE);
+
+      contadorKitsIzq++;
+      contadorKitsTotal++;
+      lanzados++;
+
+      Serial.print("Kit lanzado desde IZQUIERDA | Izq: ");
+      Serial.print(contadorKitsIzq);
+      Serial.print(" | Der: ");
+      Serial.print(contadorKitsDer);
+      Serial.print(" | Total: ");
+      Serial.println(contadorKitsTotal);
+
+      delay(250);
+      continue;
+    }
+
+    Serial.println("No quedan kits en ninguna torre");
+    break;
+  }
+
+
+  if (giradoParaIzquierda) {
+    Serial.println("Regresando 180 a orientacion original");
+    giro90Izq();
+    delay(500);
+    giro90Izq();
+    delay(150);
   }
 
   return lanzados;
 }
-
 
 void ISR_pulsoOpenMV() {
   leerLetra = true;
@@ -1224,6 +1283,13 @@ bool atenderDeteccionOpenMV() {
   letraPendiente = '\0';
 
   return true;
+}
+
+void accionarServo(Servo &servo, int anguloCerrado, int anguloEmpuje) {
+  servo.write(anguloCerrado);
+  delay(800);
+  servo.write(anguloEmpuje);
+  delay(250);
 }
 
 
@@ -1378,22 +1444,28 @@ void calibrar_limit() {
 
 
 
-void acomodarObstaculoPID(String lado, float distanciaAvanzada) {
+/*void acomodarObstaculoPID(String lado, float distanciaAvanzada) {
   const float DISTANCIA_TILE = 30.0;
   const float ANGULO_DESVIO_DER = 30.0;
   const float ANGULO_DESVIO_IZQ = 30.0;
   const float AVANCE_DIAGONAL_DER = 9.0;
   const float AVANCE_DIAGONAL_IZQ = 9.0;
-  const float AVANCE_RECTO_POST_DIAGONAL = 2.0;
-
-  float anguloOriginal = readHeadingAvg(3);
 
   stopMotors();
-  delay(60);
+  delay(100);
+  esperarEstable();
+  float anguloOriginal = readHeadingAvg(5);
 
   // 1) regresar exactamente lo que ya había avanzado
   retroceder(distanciaAvanzada);
-  delay(60);
+  delay(80);
+  stopMotors();
+  delay(80);
+  esperarEstable();
+
+  turnToHeading(anguloOriginal);
+  delay(80);
+  esperarEstable();
 
   float objetivoDesvio;
   float avanceDiagonal;
@@ -1410,7 +1482,8 @@ void acomodarObstaculoPID(String lado, float distanciaAvanzada) {
   }
 
   turnToHeading(objetivoDesvio);
-  delay(60);
+  delay(80);
+  esperarEstable();
 
   avanzarRectoConHeading(avanceDiagonal, objetivoDesvio, BASE_SPEED - 15);
   stopMotors();
@@ -1419,24 +1492,22 @@ void acomodarObstaculoPID(String lado, float distanciaAvanzada) {
 
   turnToHeading(anguloOriginal);
   delay(60);
+  esperarEstable();
 
-
-  avanzarRectoConHeading(AVANCE_RECTO_POST_DIAGONAL, anguloOriginal, BASE_SPEED - 20);
 
   float avanceFrontalDiagonal = avanceDiagonal * cos(anguloDesvio * DEG_TO_RAD);
-
-  float avanceYaGanado = avanceFrontalDiagonal + AVANCE_RECTO_POST_DIAGONAL;
-
-  float distanciaPendiente = DISTANCIA_TILE - avanceYaGanado;
+  float distanciaPendiente = DISTANCIA_TILE - avanceFrontalDiagonal;
 
   if (distanciaPendiente < 0) distanciaPendiente = 0;
   if (distanciaPendiente > DISTANCIA_TILE) distanciaPendiente = DISTANCIA_TILE;
 
 
   avanzarRectoConHeading(distanciaPendiente, anguloOriginal, BASE_SPEED);
+  stopMotors();
+  delay(100);
+  esperarEstable();
 
-  calibrar_lateral();
-}
+}*/
 
 /*void acomodarObstaculoPID(String lado, float distanciaAvanzada) {
   const float DISTANCIA_TILE = 30.0;
@@ -1494,95 +1565,7 @@ void acomodarObstaculoPID(String lado, float distanciaAvanzada) {
   calibrar_lateral();
 }*/
 
-void calibrar_lateral() {
-  display.clearDisplay();
-  display.setCursor(5, 5);
-  display.println("Alineando...");
-  display.display();
 
-  const float KP_LAT = 0.7;
-  const int VEL_BASE = 165;
-  const float MIN_PARED = 40.0;
-  const float MAX_PARED = 400.0;
-  const float UMBRAL_CENTRADO = 5.0;
-
-  unsigned long startTime = millis();
-  const unsigned long TIMEOUT = 600;
-  float anguloObjetivo = readHeadingAvg(5);
-
-  while (true) {
-    modoLateral = 0;
-    if (millis() - startTime > TIMEOUT) break;
-
-    float s1 = 1000, s3 = 1000, s4 = 1000, s6 = 1000;
-    VL53L0X_RangingMeasurementData_t measure;
-
-    if (sensorActivo[1]) {
-      sensores[1].rangingTest(&measure, false);
-      if (measure.RangeStatus != 4) s1 = measure.RangeMilliMeter;
-    }
-    if (sensorActivo[3]) {
-      sensores[3].rangingTest(&measure, false);
-      if (measure.RangeStatus != 4) s3 = measure.RangeMilliMeter;
-    }
-    if (sensorActivo[4]) {
-      sensores[4].rangingTest(&measure, false);
-      if (measure.RangeStatus != 4) s4 = measure.RangeMilliMeter;
-    }
-    if (sensorActivo[6]) {
-      sensores[6].rangingTest(&measure, false);
-      if (measure.RangeStatus != 4) s6 = measure.RangeMilliMeter;
-    }
-
-    float izquierda = (s1 + s3) / 2.0;
-    float derecha = (s4 + s6) / 2.0;
-
-    bool paredIzq = (izquierda > MIN_PARED && izquierda < MAX_PARED);
-    bool paredDer = (derecha > MIN_PARED && derecha < MAX_PARED);
-
-    if (paredIzq && paredDer) modoLateral = 1;
-    else if (paredIzq && !paredDer) modoLateral = 2;
-    else if (!paredIzq && paredDer) modoLateral = 3;
-
-    float correccion = 0;
-
-    if (modoLateral == 1) {
-      float diferencia = derecha - izquierda;
-      if (abs(diferencia) <= UMBRAL_CENTRADO) break;
-      correccion = diferencia * KP_LAT;
-    } else if (modoLateral == 2) {
-      const float DIST_OBJ_IZQ = 118.0;
-      float error = DIST_OBJ_IZQ - izquierda;
-      correccion = error * KP_LAT;
-    } else if (modoLateral == 3) {
-      const float DIST_OBJ_DER = 128.0;
-      float error = derecha - DIST_OBJ_DER;
-      correccion = error * KP_LAT;
-    }
-
-    float actual = readHeadingRaw();
-    float errorAng = angleDiff(anguloObjetivo, actual);
-    float correccionAng = errorAng * 1.2;
-
-    int velIzq = VEL_BASE + (int)correccion + (int)correccionAng;
-    int velDer = VEL_BASE - (int)correccion - (int)correccionAng;
-
-    velIzq = constrain(velIzq, 55, 220);
-    velDer = constrain(velDer, 55, 220);
-
-    forwardRaw(velIzq, velDer);
-    delay(15);
-  }
-
-  stopMotors();
-  turnToHeading(anguloObjetivo);
-
-  display.clearDisplay();
-  display.setCursor(5, 5);
-  display.println("Centrado OK");
-  display.display();
-  delay(200);
-}
 
 void esperarEstable() {
   float prev = readHeadingAvg(5);
@@ -1595,8 +1578,6 @@ void esperarEstable() {
     prev = actual;
   }
 } 
-
-
 
 
 
@@ -1652,12 +1633,6 @@ float controlLateralContinuo() {
   return correccion;
 }
 
-void accionarServo(Servo &servo, int anguloCerrado, int anguloEmpuje) {
-  servo.write(anguloCerrado);
-  delay(800);
-  servo.write(anguloEmpuje);
-  delay(800);
-}
 
 
 void retroceder(float distanciaCM) {
@@ -1825,7 +1800,10 @@ void reaccionColor(String color, float distanciaRecorrida) {
 
     delay(100);
 
-    giro180();
+    giro90Izq();
+    delay(500);
+    giro90Izq();
+
     return;
   }
   
@@ -2105,7 +2083,9 @@ void orientarRobotA(Direccion objetivo) {
   }
   else {
     Serial.println("Accion: Giro 180");
-    giro180();
+    giro90Izq();
+    delay(500);
+    giro90Izq();
   }
 
   dirActual = objetivo;
