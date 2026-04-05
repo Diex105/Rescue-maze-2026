@@ -694,36 +694,28 @@ ResultadoMovimiento avanzar_optimizado(int DISTANCIA_CM) {
     
     // 5. Mover motores
     forwardRaw(currentLeftSpeed, currentRightSpeed);
+
+    bool L = digitalRead(LLS);
+    bool R = digitalRead(RLS);
     
-    bool limitIzq = digitalRead(LLS);
-    bool limitDer = digitalRead(RLS);
-    if (limitIzq || limitDer) {
+    if (R || L) {
       stopMotors();
       delay(50);
-      // calcular distancia recorrida hasta el choque
-      long leftTicks = abs(encLeft.read());
-      long rightTicks = abs(encRight.read());
-      long promedio = (leftTicks + rightTicks) / 2;
-      float distanciaRecorrida = promedio / TICKS_POR_CM;
-      // ángulo objetivo inicial
-      float anguloObjetivo = readHeadingAvg(5);
-      // Lectura ToFs laterales y central
-      float centro = Dist[0];   // frontal central
-      float izq = Dist[2];
-      float der = Dist[5];
-      if (limitDer) {
-        bool brusco = der <= (centro*0.7) && der <= (izq*0.7); 
-        Serial.println(brusco ? "Choque DER + ToF → acomodo brusco" : "Choque DER → acomodo leve");
-        acomodarObstaculoPID("DER", distanciaRecorrida, anguloObjetivo, brusco);
-        return MOV_OK;
-      }
-      if (limitIzq) {
-        bool brusco = izq <= (centro*0.7) && izq <= (der*0.7); 
-        Serial.println(brusco ? "Choque IZQ + ToF → acomodo brusco" : "Choque IZQ → acomodo leve");
-        acomodarObstaculoPID("IZQ", distanciaRecorrida, anguloObjetivo, brusco);
-        return MOV_OK;
-      }
+      
+      Serial.println("Choque detectado");
+
+      long leftTicks2 = abs(encLeft.read());
+      long rightTicks2 = abs(encRight.read());
+      long promedio2 = (leftTicks2 + rightTicks2) / 2;
+      float distanciaChoque = promedio2 / TICKS_POR_CM;
+
+      if (R && !L) acomodarObstaculoPID("DER", distanciaChoque);
+      else if (L && !R) acomodarObstaculoPID("IZQ", distanciaChoque);
+      else acomodarObstaculoPID("DER", distanciaChoque);
+      
+      return MOV_OK;
     }
+    
 
 
     // --- DETECCIÓN DE RAMPA/ESCALERA ---
@@ -1410,16 +1402,28 @@ bool atenderDeteccionOpenMV() {
 
   if (letraPendiente == 'P') {
     Serial.println("Detenido por PHI");
+    display.clearDisplay();
+    display.setCursor(0,0);
+    display.println("PHI");
+    display.display();
     kitsSolicitados = 2;
 
   }
   else if (letraPendiente == 'S') {
     Serial.println("Detenido por PSI");
+    display.clearDisplay();
+    display.setCursor(0,0);
+    display.println("PHI");
+    display.display();
     kitsSolicitados = 1;
 
   }
   else if (letraPendiente == 'O') {
     Serial.println("Detenido por OMEGA");
+    display.clearDisplay();
+    display.setCursor(0,0);
+    display.println("PHI");
+    display.display();
     kitsSolicitados = 0;
 
     for (int i = 0; i < NUMPIXELS; i++) {
@@ -1600,147 +1604,72 @@ void calibrar_limit() {
   delay(500);
 }
 
-void acomodarObstaculoPID(String lado, float distanciaAvanzada, float anguloObjetivo, bool brusco) {
-
-  float retrocederCMparaAcomodar = 10.0;
-  long ticksObjetivo = retrocederCMparaAcomodar * TICKS_POR_CM;
-  long fase1 = ticksObjetivo * 0.89;
-  long fase2 = ticksObjetivo * 0.375;
-
-  int velBase = 100;
-  int delta = 125;
-
-  // =========================
-  // DETECTAR CONTACTO INICIAL
-  // =========================
-  bool izq = digitalRead(LLS);
-  bool der = digitalRead(RLS);
-
-  if (izq || der) {
-
-    Serial.println("CONTACTO DETECTADO");
-
-    stopMotors();
-    delay(80);
-
-    while (digitalRead(LLS) == 1 || digitalRead(RLS) == 1) {
-      retroceder(1);
-
-    }
-    stopMotors();
-    delay(80);
-
-    // Guardar lado de impacto
-    String ladoImpacto;
-    if (der) ladoImpacto = "DER";
-    else ladoImpacto = "IZQ";
-
-    // =========================
-    // FASE 1 (DIAGONAL)
-    // =========================
-    encLeft.write(0);
-    encRight.write(0);
-
-    while (true) {
-
-      bool izqNow = digitalRead(LLS);
-      bool derNow = digitalRead(RLS);
-
-  
-      if (izqNow && derNow) {
-        Serial.println("PARED DETECTADA (FASE 1)");
-
-        stopMotors();
-        delay(120);
-
-        float nuevoObjetivo;
-        if (ladoImpacto == "DER")
-          nuevoObjetivo = normalize360(anguloObjetivo + 90.0);
-        else
-          nuevoObjetivo = normalize360(anguloObjetivo - 90.0);
-
-        turnToHeading(nuevoObjetivo);
-        delay(100);
-        esperarEstable();
-
-        return;
-      }
-
-      long promedio = (abs(encLeft.read()) + abs(encRight.read())) / 2;
-      if (promedio >= fase1) break;
-
-      if (ladoImpacto == "DER")
-        backwardRaw(velBase - (delta * 0.3), velBase + delta);
-      else
-        backwardRaw(velBase + delta, velBase - (delta * 0.3));
-    }
-
-    stopMotors();
-    delay(120);
-
-    // =========================
-    // FASE 2 (GIRO LOCAL)
-    // =========================
-    encLeft.write(0);
-    encRight.write(0);
-
-    while (true) {
-
-      bool izqNow = digitalRead(LLS);
-      bool derNow = digitalRead(RLS);
-
-      if (izqNow && derNow) {
-        Serial.println("PARED DETECTADA (FASE 2)");
-
-        stopMotors();
-        delay(120);
-
-        float nuevoObjetivo;
-        if (ladoImpacto == "DER")
-          nuevoObjetivo = normalize360(anguloObjetivo + 90.0);
-        else
-          nuevoObjetivo = normalize360(anguloObjetivo - 90.0);
-
-        turnToHeading(nuevoObjetivo);
-        delay(100);
-        esperarEstable();
-
-        return;
-      }
-
-      long promedio = (abs(encLeft.read()) + abs(encRight.read())) / 2;
-      if (promedio >= fase2) break;
-
-      if (ladoImpacto == "DER")
-        backwardRaw(velBase + delta, 0);
-      else
-        backwardRaw(0, velBase + delta);
-    }
-
-    stopMotors();
-    delay(120);
-  }
-
-
-
-  // =========================
-  // AVANCE FINAL
-  // =========================
-  #define FACTOR_AVANCE 1.08
-
-  float compensacionRetroceso = retrocederCMparaAcomodar * 1.1;
-  float distanciaPendiente = (30.0 - distanciaAvanzada + compensacionRetroceso) * FACTOR_AVANCE;
-
-  if (distanciaPendiente < 0) distanciaPendiente = 0;
-
-  avanzar_optimizado(distanciaPendiente);
+void acomodarObstaculoPID(String lado, float distanciaAvanzada) { 
+  const float DISTANCIA_TILE = 30.0;
+  const float ANGULO_DESVIO_DER = 30.0;
+  const float ANGULO_DESVIO_IZQ = 30.0;
+  const float AVANCE_DIAGONAL_DER = 9.0;
+  const float AVANCE_DIAGONAL_IZQ = 9.0;
 
   stopMotors();
-  delay(120);
+  delay(100);
   esperarEstable();
+  float anguloOriginal = readHeadingAvg(5);
+
+  retroceder(4);
+  delay(80);
+  stopMotors();
+  delay(80);
+  esperarEstable();
+  
+  leerTOFS();
+
+  const float UMBRAL_FRENTE = 120.0;
+  if (Dist[0] == 0 || Dist[0] < UMBRAL_FRENTE) {
+    Serial.print("Muy cerca al frente, cancelar evasión. Dist[0]: ");
+    Serial.println(Dist[0]);
+    return;  
+  }
+
+  float objetivoDesvio;
+  float avanceDiagonal;
+  float anguloDesvio;
+
+  if (lado == "DER") {
+    anguloDesvio = ANGULO_DESVIO_DER;
+    objetivoDesvio = normalize360(anguloOriginal - anguloDesvio);
+    avanceDiagonal = AVANCE_DIAGONAL_DER;
+  } else {
+    anguloDesvio = ANGULO_DESVIO_IZQ;
+    objetivoDesvio = normalize360(anguloOriginal + anguloDesvio);
+    avanceDiagonal = AVANCE_DIAGONAL_IZQ;
+  }
+
+  turnToHeading(objetivoDesvio);
+  delay(80);
+  avanzarRectoConHeading(avanceDiagonal, objetivoDesvio, BASE_SPEED - 15);
+  stopMotors();
+  delay(80);
+  turnToHeading(anguloOriginal - 5);
+  esperarEstable();
+  delay(60);
+ 
+
+
+  float avanceFrontalDiagonal = avanceDiagonal * cos(anguloDesvio * DEG_TO_RAD);
+  float distanciaPendiente = DISTANCIA_TILE - avanceFrontalDiagonal;
+
+  if (distanciaPendiente < 0) distanciaPendiente = 0;
+  if (distanciaPendiente > DISTANCIA_TILE) distanciaPendiente = DISTANCIA_TILE;
+
+
+  avanzarRectoConHeading(distanciaPendiente, anguloOriginal - 5, BASE_SPEED);
+  
+  stopMotors();
+  delay(100);
+  esperarEstable();
+
 }
-
-
 
 void esperarEstable() {
   float prev = readHeadingAvg(5);
