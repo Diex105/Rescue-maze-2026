@@ -1316,18 +1316,18 @@ float leerVoltajeOpenMV(int muestras = 8) {
 }
 
 int decodificarValorOpenMV(float v) {
-  // 0 kits -> 0.80V
-  // 1 kit  -> 1.65V
-  // 2 kits -> 2.80V
+  // phi = 0.00V
+  // psi = 1.33V
+  // omega = 3.00V
 
-  if (v > 0.55f && v < 1.05f) {
-    return 0;
+  if (v < 0.35f) {
+    return 2;   // phi
   }
-  else if (v > 1.40f && v < 1.90f) {
-    return 1;
+  else if (v > 1.00f && v < 1.60f) {
+    return 1;   // psi
   }
-  else if (v > 2.55f && v < 3.05f) {
-    return 2;
+  else if (v > 2.60f) {
+    return 0;   // omega
   }
 
   return -1;
@@ -1360,7 +1360,7 @@ bool procesarSenalOpenMV() {
 bool atenderDeteccionOpenMV() {
   if (bloquearOpenMV) return false;
   if (enLackOfProgress) return false;
-
+  
   // Tiene que existir una peticion pendiente desde OpenMV
   if (!leerValor) return false;
 
@@ -1368,7 +1368,7 @@ bool atenderDeteccionOpenMV() {
   // 1) DETENER INMEDIATAMENTE
   // ============================
   stopMotors();
-  delay(80);
+  delay(80);   // darle tiempo real al robot para asentarse
 
   // ============================
   // 2) MIENTRAS ESTA DETENIDO,
@@ -1385,12 +1385,14 @@ bool atenderDeteccionOpenMV() {
 
     leerValor = false;
     valorPendiente = -1;
+
+    // sigue detenido solo este instante; al salir, la navegacion continua
     return false;
   }
 
   // ============================
   // 3) TODAVIA DETENIDO,
-  //    AHORA SI LEER EL VALOR
+  //    AHORA SI LEER LA LETRA
   // ============================
   if (!procesarSenalOpenMV()) {
     leerValor = false;
@@ -1399,25 +1401,26 @@ bool atenderDeteccionOpenMV() {
   }
 
   // ============================
-  // 4) SI YA HAY VALOR VALIDO,
+  // 4) SI YA HAY LETRA VALIDA,
   //    EJECUTAR ACCION DE VICTIMA
   // ============================
   stopMotors();
 
   int kitsSolicitados = 0;
   uint8_t r = 255, g = 255, b = 230;
-  int parpadeosPorKit = 0;
+  int parpadeosPorKit = 1;
 
   if (valorPendiente == 2) {
-    Serial.println("Detenido por valor 2");
+    Serial.println("Detenido por PHI");
     kitsSolicitados = 2;
     r = 0;
     g = 0;
     b = 255;
     parpadeosPorKit = 2;
+
   }
   else if (valorPendiente == 1) {
-    Serial.println("Detenido por valor 1");
+    Serial.println("Detenido por PSI");
     kitsSolicitados = 1;
     r = 0;
     g = 255;
@@ -1425,15 +1428,12 @@ bool atenderDeteccionOpenMV() {
     parpadeosPorKit = 1;
   }
   else if (valorPendiente == 0) {
-    Serial.println("Detenido por valor 0");
-    kitsSolicitados = 0;
-    r = 255;
-    g = 0;
-    b = 0;
+    Serial.println("Detenido por OMEGA");
+    kitsSolicitados = 0;}
     parpadeosPorKit = 0;
 
     for (int i = 0; i < NUMPIXELS; i++) {
-      pixels.setPixelColor(i, pixels.Color(255, 0, 0));
+      pixels.setPixelColor(i, pixels.Color(255, 0, 0));   // rojo
     }
     pixels.show();
   }
@@ -1453,7 +1453,7 @@ bool atenderDeteccionOpenMV() {
     stopMotors();
 
     if (!kitsYaLanzados) {
-      int lanzados = tirarNKits(kitsSolicitados, r, g, b, parpadeosPorKit);
+      int lanzados = tirarNKits(kitsSolicitados);
 
       Serial.print("Kits solicitados: ");
       Serial.print(kitsSolicitados);
@@ -1473,7 +1473,7 @@ bool atenderDeteccionOpenMV() {
     pixels.setPixelColor(i, pixels.Color(255, 255, 230));
   }
   pixels.show();
-
+  
   leerValor = false;
   valorPendiente = -1;
 
